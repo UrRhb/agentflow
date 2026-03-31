@@ -11,10 +11,10 @@ This is a ONE-SHOT command. It reads state, makes decisions, updates the Kanban 
 
 ```bash
 # Default (every 15 min, ~$48/day):
-*/15 * * * * /usr/local/bin/claude -p "Run /sdlc-orchestrate" >> /tmp/sdlc-orchestrate.log 2>&1
+*/15 * * * * ~/.claude/sdlc/agentflow-cron.sh >> /tmp/agentflow-orchestrate.log 2>&1
 
 # Sprint mode (every 5 min, use during active dev only):
-# */5 * * * * /usr/local/bin/claude -p "Run /sdlc-orchestrate" >> /tmp/sdlc-orchestrate.log 2>&1
+# */5 * * * * ~/.claude/sdlc/agentflow-cron.sh >> /tmp/agentflow-orchestrate.log 2>&1
 ```
 
 ## Setup
@@ -23,6 +23,16 @@ This is a ONE-SHOT command. It reads state, makes decisions, updates the Kanban 
 2. Read all prompt templates for reference (don't execute them — that's the workers' job)
 
 ## Sweep Process
+
+### Step 0: Acquire Sweep Lock
+
+Check the Status task for a recent `[SWEEP:RUNNING <timestamp>]` comment.
+If a sweep started less than 10 minutes ago, EXIT immediately:
+  "Another sweep is still running (started `<timestamp>`). Skipping this invocation."
+If no recent sweep or last sweep is >10 min old:
+  Post: `[SWEEP:RUNNING <current_timestamp>]`
+  Continue with Step 1.
+At the END of the sweep (after Step 9), post: `[SWEEP:COMPLETE <current_timestamp>]`
 
 ### Step 1: Discover Projects
 
@@ -36,6 +46,8 @@ For each project:
 - Get all tasks per section
 
 Build the complete pipeline state: a map of all tasks, their stages, slots, retry counts, and costs.
+
+**Quick check:** If ALL tasks across all projects are in Backlog (waiting on dispatch) or Done, and no tasks are in active stages (Research/Build/Review/Test/Integrate), post a minimal status update and EXIT early. This "idle sweep" costs ~$0.02 instead of ~$0.50.
 
 ### Step 2: Spec Drift Check
 
@@ -61,7 +73,9 @@ For each task in Build/Review/Test stages with an assigned slot:
 
 ### Step 4: Process Stage Transitions
 
-For each task, check the latest comment tag and update accordingly:
+For each task, read the LAST 10 comments per task (not all comments). The latest comment tag determines state. If the task has >20 comments, only parse the most recent 20 for transition logic. This prevents context window overflow on long-running tasks.
+
+Check the latest comment tag and update accordingly:
 
 | Latest Tag | Current Section | Action |
 |-----------|----------------|--------|
@@ -78,6 +92,8 @@ For each task, check the latest comment tag and update accordingly:
 | `[BUILD:BLOCKED]` | 3 - Build | Move to "0 - Needs Human" |
 | `[HOLD]` | Any | Move to "0 - Needs Human" |
 
+**Merge lock check:** Before processing any `[TEST:PASS]` transition that would lead to merge, check the Status task for an active `[MERGE_LOCK]`. If locked by another task, do NOT transition -- leave the task in Test until the lock clears.
+
 Batch move tasks between sections where possible.
 
 ### Step 5: Trigger Feedback Loops
@@ -86,9 +102,9 @@ For each task that was rejected/failed:
 
 1. Increment retry counter: update `[RETRY:N]` → `[RETRY:N+1]`
 2. Update cost: add stage cost to `[COST:~$X]`
-3. Check cost thresholds:
-   - If > $5: Post `[COST:WARNING]`
-   - If > $15: Post `[COST:CRITICAL]`, move to "0 - Needs Human", STOP processing this task
+3. Check cost thresholds (cost ceilings depend on model configuration -- check conventions.md for the active cost profile, Sonnet or Opus. Default to Sonnet ceilings unless the project's conventions explicitly specify Opus):
+   - If > warning threshold ($3 Sonnet / $8 Opus): Post `[COST:WARNING]`
+   - If > hard stop ($10 Sonnet / $20 Opus): Post `[COST:CRITICAL]`, move to "0 - Needs Human", STOP processing this task
 4. Post retry context comment:
 
 ```markdown
@@ -164,7 +180,8 @@ If >= 10 new completed tasks since last retrospective:
 **Added:** <today's date>
 ```
 
-4. Post comment on Status task: `[RETROSPECTIVE] Analyzed <N> completed tasks. Added <M> patterns to LEARNINGS.md.`
+4. After writing new patterns, check LEARNINGS.md line count. If >50 lines, remove the oldest patterns (top of file) to keep the file under 50 lines. This prevents the context window bomb on workers.
+5. Post comment on Status task: `[RETROSPECTIVE] Analyzed <N> completed tasks. Added <M> patterns to LEARNINGS.md.`
 
 ### Step 8: Update Status Dashboard
 
@@ -187,6 +204,8 @@ ETA: ~<hours> at current pace (<tasks_remaining> tasks / <tasks_per_hour> veloci
 - <timestamp>: <task_code> moved to <stage>
 - <timestamp>: <task_code> <event>
 ```
+
+Also update the Status task description with `[LAST_SWEEP:<timestamp>]`. External monitoring (setup.sh configures this) checks this timestamp. If >30 min stale, an alert fires.
 
 Also post a status update to the project:
 - Color: green (all progressing) / yellow (any retries > 2) / red (any in Needs Human)

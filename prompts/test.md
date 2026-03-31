@@ -105,7 +105,9 @@ Check coverage for new files (from predicted files list):
 
 ### If PASS:
 
-1. Merge the PR:
+1. **Acquire merge lock:** Post comment on the project's Status task: `[MERGE_LOCK:T<slot>:<task_code>]`. Check that no other `[MERGE_LOCK]` comment exists in the last 5 minutes. If another lock exists, WAIT 2 minutes and check again. After merge + integration check completes, post `[MERGE_UNLOCK:T<slot>]`.
+
+2. Merge the PR:
 ```bash
 gh pr merge <PR_NUMBER> --squash --delete-branch
 ```
@@ -203,6 +205,11 @@ Main branch is healthy after merge.
 Update task description: change `[STAGE:Integrate]` to `[STAGE:Done]`
 Mark task as completed.
 
+Clean up the worktree:
+```
+ExitWorktree: action="cleanup"
+```
+
 ### If FAIL:
 
 **Auto-revert the merge:**
@@ -215,6 +222,8 @@ MERGE_COMMIT=$(git log --oneline -1 --format="%H")
 git revert $MERGE_COMMIT --no-edit
 git push origin main
 ```
+
+**If `git revert` fails** (merge conflict): post `[INTEGRATE:REVERT_FAILED] Manual intervention required. Revert conflicted with subsequent changes.` Move task to Needs Human. Do NOT attempt to resolve revert conflicts automatically.
 
 Post comment:
 

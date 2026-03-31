@@ -118,8 +118,9 @@ After generating all tasks, validate:
 
 4. **Atomicity check**: No task creates+modifies > 5 files total
 
-5. **Verification syntax check**: Every verification command is plausible bash
-   - Contains `npm test`, `npx tsc`, `node`, `curl`, or similar
+5. **Verification syntax check**: Every verification command is valid AND safe shell syntax
+   - Allowed commands: `npm`/`npx` commands, `node` commands, `curl` to localhost only, `grep`/`test` commands
+   - Reject any command containing: `curl`/`wget`/`fetch` to external URLs, `rm -rf`, `sudo`, `eval`, backticks executing arbitrary code, pipes to `sh`/`bash`
    - No obvious syntax errors
 
 6. **Naming check**: All task codes are sequential and unique

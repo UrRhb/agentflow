@@ -20,7 +20,7 @@ AgentFlow doesn't build a separate database, message queue, or custom infrastruc
 A **stateless, one-shot sweep** that runs via real crontab — not a daemon, not a session-based scheduler.
 
 ```
-*/15 * * * * /usr/local/bin/claude -p "Run /sdlc-orchestrate" >> /tmp/sdlc-orchestrate.log 2>&1
+*/15 * * * * ~/.claude/sdlc/agentflow-cron.sh >> /tmp/agentflow-orchestrate.log 2>&1
 ```
 
 Each sweep:
@@ -145,25 +145,116 @@ Kanban Board (Asana)
         └── Can drag cards to intervene
 ```
 
+## Superpowers Integration Layer
+
+AgentFlow can optionally integrate with [Superpowers](https://github.com/NickBodnar/superpowers) (or similar methodology-as-prompt tools) to enhance build quality. The integration follows a strict two-layer architecture:
+
+### Two-Layer Model
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  OUTER LOOP — AgentFlow (Lifecycle Owner)                   │
+│  Owns: dispatch, heartbeat, tags, transitions, cost, retry  │
+│                                                              │
+│  ┌─────────────────────────────────────────────────────────┐ │
+│  │  INNER LOOP — Superpowers (Methodology Owner)           │ │
+│  │  Owns: brainstorm, plan, sub-agents, TDD, verification  │ │
+│  │  Reads: predicted files, acceptance criteria (as limits) │ │
+│  │  Cannot: skip tags, exceed scope, override cost limits   │ │
+│  └─────────────────────────────────────────────────────────┘ │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**AgentFlow** controls WHEN things happen (start, complete, heartbeat, retry, cost check).
+**Superpowers** controls HOW things happen (planning approach, sub-agent strategy, TDD flow).
+
+### Complexity Gating
+
+Not every task benefits from full Superpowers overhead. Tasks are gated by complexity:
+
+| Complexity | Brainstorm | Plan | Sub-Agents | Estimated Overhead |
+|------------|-----------|------|------------|-------------------|
+| Simple (S) | Skip | Skip | No | ~$0 extra |
+| Medium (M) | Skip | Yes | Optional | ~$0.20-0.40 extra |
+| Large (L) | Yes | Yes | Yes | ~$0.50-1.00 extra |
+
+### Sub-Agent Management
+
+When Superpowers dispatches sub-agents within a build stage:
+
+- **Heartbeat continuity**: Parent posts `[HEARTBEAT]` before dispatching and between sub-agent completions. Sub-agents do not post their own heartbeats.
+- **File conflict prevention**: Parent assigns non-overlapping file sets to each sub-agent based on the task's predicted files. If files cannot be cleanly partitioned, sub-agents run sequentially.
+- **Output aggregation**: Parent aggregates all sub-agent outputs into a single structured comment before posting `[BUILD:COMPLETE]` or failure tags. This preserves context for retries.
+
+## Safety & Sanitization
+
+### Input Sanitization
+
+Every stage execution begins with an input sanitization check. The worker scans task descriptions, research results, and external inputs for:
+
+- Instruction override patterns ("ignore all previous instructions", "disregard above")
+- Base64-encoded command sequences
+- Suspicious URLs or redirect chains
+- Attempts to read environment variables or secrets
+
+If detected: `[SECURITY:WARNING]` is posted and the task moves to Needs Human.
+
+### Verification Command Allowlist
+
+Verification commands in task descriptions are restricted to known-safe patterns:
+
+- `npm test`, `npm run <script>`, `npx <tool>`
+- `pytest`, `python -m pytest`
+- `go test`, `cargo test`, `mix test`
+- `curl localhost:<port>` (local only)
+- Custom commands explicitly allowlisted in project configuration
+
+Commands containing pipes to `sh`, `eval`, `exec`, or network calls to external hosts are rejected.
+
+### LEARNINGS.md as Injection Vector
+
+LEARNINGS.md is written by the system (retrospective step) and read by all workers. A compromised or manipulated LEARNINGS.md could inject instructions into every subsequent build. Mitigations:
+
+- LEARNINGS.md is capped at 50 lines (limits blast radius)
+- Only the orchestrator's retrospective step writes to LEARNINGS.md
+- Workers read LEARNINGS.md as reference data, not as executable instructions
+- Patterns follow a strict format; anything not matching the format is ignored
+
 ## Cost Model
 
-AgentFlow tracks costs per task using stage cost ceilings as estimates:
+AgentFlow tracks costs per task using dual cost profiles:
 
-| Stage | Estimated Cost | What's Measured |
-|-------|---------------|-----------------|
-| Research | ~$1.00 | Token cost for context gathering |
-| Build | ~$3.00 | Code generation + local testing |
-| Review | ~$0.50 | Code reading + analysis |
-| Test | ~$1.00 | Test execution + validation |
-| Integrate | ~$0.25 | Quick suite run on main |
+### Sonnet Profile (default, recommended)
+| Stage | Without Superpowers | With Superpowers (M) | With Superpowers (L) |
+|-------|--------------------|--------------------|---------------------|
+| Research | ~$0.10 | ~$0.10 | ~$0.10 |
+| Build | ~$0.40 | ~$0.80 | ~$1.20 |
+| Review | ~$0.10 | ~$0.10 | ~$0.10 |
+| Test | ~$0.05 | ~$0.05 | ~$0.05 |
+| Integrate | ~$0.03 | ~$0.03 | ~$0.03 |
+
+Guardrails: Warning at $3, Hard stop at $10
+
+### Opus Profile (for complex projects)
+| Stage | Without Superpowers | With Superpowers (M) | With Superpowers (L) |
+|-------|--------------------|--------------------|---------------------|
+| Research | ~$1.00 | ~$1.00 | ~$1.50 |
+| Build | ~$3.00 | ~$5.00 | ~$8.00 |
+| Review | ~$0.50 | ~$0.50 | ~$0.50 |
+| Test | ~$1.00 | ~$1.00 | ~$1.00 |
+| Integrate | ~$0.25 | ~$0.25 | ~$0.25 |
+
+Guardrails: Warning at $8, Hard stop at $20
 
 **Orchestrator cost (crontab):**
-- Default (`*/15`): ~$48/day (96 sweeps × ~$0.50/sweep)
-- Sprint mode (`*/5`): ~$144/day (288 sweeps × ~$0.50/sweep)
+- Default (`*/15`): ~$48/day with Opus, ~$10/day with Sonnet (recommended)
+- Sprint mode (`*/5`): ~$144/day with Opus, ~$30/day with Sonnet
+- Idle optimization: consecutive idle sweeps double the interval (15 -> 30 -> 60 min)
 
-**Per-task guardrails:**
-- Warning at $5 → `[COST:WARNING]` comment
-- Hard stop at $15 → `[COST:CRITICAL]` → task moves to Needs Human
+**Expected cost per sprint (14 tasks):**
+- Sonnet profile, no Superpowers: ~$44-60
+- Sonnet profile, with Superpowers: ~$60-100
+- Opus profile, with Superpowers: ~$120-200
 
 ## Adapter Architecture
 
@@ -208,7 +299,15 @@ Each adapter maps these operations to the specific PM tool's API. The core skill
 | Integration breaks main | Tests fail after merge | Auto-revert via `git revert` (new commit) |
 | Task is impossible | 2+ build failures | `[BUILD:BLOCKED]` → Needs Human |
 | Spec changes mid-sprint | SHA-256 hash mismatch | All tasks flagged `[NEEDS:REVALIDATION]` |
-| Cost runaway | Per-task tracking | Warning at $5, hard stop at $15 |
+| Cost runaway | Per-task tracking | Warning at threshold, hard stop at ceiling |
 | All slots busy | Orchestrator checks availability | Tasks wait in Backlog until slot frees |
 | Circular dependencies | Topological sort at decomposition | Blocked before tasks are created |
 | Shared file conflicts | Predicted files comparison | Parallel tasks serialized |
+| Concurrent merges | `[MERGE_LOCK]` on Status task | Second merge waits, retries after lock release |
+| Dual sweep collision | `[SWEEP:RUNNING]` timestamp check | Second sweep exits immediately if recent sweep active |
+| Git revert fails | `git revert` exits non-zero | `[INTEGRATE:REVERT_FAILED]` → Needs Human (manual fix required) |
+| Crontab dies silently | `[LAST_SWEEP]` timestamp >30 min old | External watchdog sends notification |
+| Stale worktrees accumulate | Task moves to Done | Worktree cleaned up on Done transition |
+| Review ping-pong | Minor-only issues on retry 2+ | `[REVIEW:PASS_WITH_NOTES]` allows proceed with suggestions |
+| Prompt injection in inputs | Sanitization check at stage entry | `[SECURITY:WARNING]` → Needs Human |
+| LEARNINGS.md overflow | Line count check on write | Oldest patterns rotated out, cap at 50 lines |

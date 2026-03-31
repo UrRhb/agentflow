@@ -50,8 +50,8 @@ You don't need to trust a black box. Open your Kanban board and watch the pipeli
 
 ### Observability & Cost Tracking
 - **Full pipeline observability** from your phone — every task card shows current stage, assigned agent, retry count, and accumulated cost
-- **Per-task cost tracking** with stage cost ceilings (Research ~$1, Build ~$3, Review ~$0.50, Test ~$1, Integrate ~$0.25)
-- **Automatic cost guardrails**: Warning at $5, hard stop at $15 with human escalation
+- **Per-task cost tracking** with stage cost ceilings (Sonnet default: Research ~$0.10, Build ~$0.40, Review ~$0.10, Test ~$0.05, Integrate ~$0.03)
+- **Automatic cost guardrails**: Warning at $3/$8, hard stop at $10/$20 (Sonnet/Opus) with human escalation
 - **Real-time status dashboard** pinned to each project
 - **Heartbeat monitoring**: Dead agents detected and reassigned within 10 minutes
 
@@ -157,7 +157,7 @@ claude -p "/sdlc-worker --slot T5"
 ```bash
 # Add to crontab (runs every 15 minutes)
 crontab -e
-# Add: */15 * * * * /usr/local/bin/claude -p "Run /sdlc-orchestrate" >> /tmp/sdlc-orchestrate.log 2>&1
+# Add: */15 * * * * ~/.claude/sdlc/agentflow-cron.sh >> /tmp/agentflow-orchestrate.log 2>&1
 ```
 
 **5. Watch from your phone**
@@ -220,7 +220,7 @@ Claude: Graceful shutdown initiated. Active workers finishing...
     ├── Slot cleared → different worker assigned on retry 2+
     ├── Task moves back to Build
     │
-    └── If cost > $15 → [COST:CRITICAL] → moves to "Needs Human"
+    └── If cost exceeds hard stop threshold → [COST:CRITICAL] → moves to "Needs Human"
 ```
 
 ## Comparison
@@ -247,9 +247,75 @@ Claude: Graceful shutdown initiated. Active workers finishing...
 ### When to Use What
 
 - **AgentFlow**: You want full pipeline observability, deterministic quality gates, cost tracking, and the ability to monitor/intervene from your phone. Best for teams and solo devs running multiple projects.
+- **AgentFlow + Superpowers**: You want the best of both — AgentFlow orchestrates across tasks, Superpowers optimizes each worker's methodology. [See integration guide below.](#superpowers-integration)
 - **GSD**: You want a simple CLI tool for wave-based task execution. Good for quick prototyping.
 - **Superpowers**: You want a methodology-as-prompt approach with minimal setup. Good for single-project focus.
 - **Aperant**: You want a desktop GUI for agent management. Good for visual workflow preference.
+
+## Superpowers Integration
+
+<a id="superpowers-integration"></a>
+
+AgentFlow and [Superpowers](https://github.com/obra/superpowers) operate at **different layers** and are designed to stack:
+
+```
+┌───────────────────────────────────────────────────────────┐
+│  OUTER LOOP — AgentFlow                                    │
+│  "Which task should which agent work on, and when?"        │
+│  Kanban board • dispatch • transitions • cost gates        │
+│                                                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
+│  │  Worker T2   │  │  Worker T3   │  │  Worker T4   │       │
+│  │  INNER LOOP  │  │  INNER LOOP  │  │  INNER LOOP  │       │
+│  │  Superpowers │  │  Superpowers │  │  Superpowers │       │
+│  │  brainstorm  │  │  brainstorm  │  │  code-review │       │
+│  │  → plan      │  │  → plan      │  │  + adversary │       │
+│  │  → execute   │  │  → execute   │  │    rules     │       │
+│  │  → verify    │  │  → verify    │  │              │       │
+│  └─────────────┘  └─────────────┘  └─────────────┘        │
+└───────────────────────────────────────────────────────────┘
+```
+
+**AgentFlow** decides: *"Task APP-007 goes to Worker T2 now"*
+**Superpowers** decides: *"Inside T2, I'll brainstorm → plan → execute with sub-agents → verify"*
+
+### What Each Layer Controls
+
+| Concern | AgentFlow (outer) | Superpowers (inner) |
+|---------|-------------------|-------------------|
+| Task assignment | Which worker gets which task | — |
+| Build methodology | Lifecycle markers + heartbeats | brainstorm → plan → execute → verify |
+| Parallelism | Across tasks (T2 builds one, T3 builds another) | Within a task (sub-agents write code in parallel) |
+| Quality gates | Deterministic (tsc/lint/test) + adversarial review | Structured review methodology |
+| Debugging | Retry context + worker rotation | Systematic debugging methodology |
+| Cost tracking | Per-task with guardrails | — |
+
+### Complexity Gating
+
+Not every task needs Superpowers' full methodology. AgentFlow gates by task complexity:
+
+| Complexity | Superpowers Methodology | Why |
+|-----------|------------------------|-----|
+| **S** (Simple, <30min) | Skip brainstorm + plan. Direct build. | Overkill adds ~$0.50-1.00 for zero quality gain |
+| **M** (Medium, <1hr) | Skip brainstorm. Use plan → execute. | Planning helps, brainstorming doesn't |
+| **L** (Complex, <2hr) | Full: brainstorm → plan → execute → verify | Worth the investment on complex tasks |
+
+### Integration Gaps (24-31)
+
+Stacking two systems creates 8 new failure modes. All are addressed in AgentFlow's design:
+
+| # | Gap | Fix |
+|---|-----|-----|
+| 24 | Context window war (both systems load large prompts) | Lazy-load: only load Superpowers prompts matching task complexity |
+| 25 | Two captains (conflicting workflow control) | AgentFlow owns lifecycle, Superpowers owns methodology |
+| 26 | Sub-agents skip heartbeats (false dead-worker detection) | Parent worker posts heartbeats independently of sub-agents |
+| 27 | Plan exceeds task scope (Superpowers plans freely) | Feed predicted files + acceptance criteria as hard constraints |
+| 28 | Double cost tracking (sub-agents add hidden cost) | Adjusted ceilings: S=$3, M=$5, L=$8 when Superpowers active |
+| 29 | Retry context fragmentation (sub-agent failures lost) | Parent aggregates all sub-agent outputs before posting |
+| 30 | Brainstorm overkill on simple tasks | Complexity gating (table above) |
+| 31 | Conflicting review standards | AgentFlow adversarial rules override; Superpowers provides methodology |
+
+[Full details for all 45 gaps →](docs/gap-registry.md)
 
 ## Adapters
 
@@ -265,9 +331,9 @@ AgentFlow uses an adapter pattern to support multiple project management tools. 
 
 Want to build an adapter? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-## The 23-Gap Registry
+## The 45-Gap Registry
 
-AgentFlow was designed by systematically identifying and closing 23 gaps in AI development pipelines. Each gap represents a failure mode that existing tools don't address.
+AgentFlow was designed by systematically identifying and closing 45 gaps in AI development pipelines — 23 for the core system, 8 for Superpowers integration, and 14 from production audit findings. Each gap represents a failure mode that existing tools don't address.
 
 | # | Gap | Fix |
 |---|-----|-----|
@@ -284,7 +350,7 @@ AgentFlow was designed by systematically identifying and closing 23 gaps in AI d
 | 11 | Asana custom fields are fragile | All metadata in description headers, parsed with regex |
 | 12 | Session-based scheduling dies with session | Stateless orchestrator + real crontab (most critical gap) |
 | 13 | No visibility into what agents are doing | Comment-thread-as-memory: every action is a tagged comment |
-| 14 | Runaway costs on stuck tasks | Cost ceilings per stage, warning at $5, hard stop at $15 |
+| 14 | Runaway costs on stuck tasks | Cost ceilings per stage, warning at $3/$8, hard stop at $10/$20 (Sonnet/Opus) |
 | 15 | Uncontrolled external API usage | Source priority: codebase → docs → web → GitHub (opt-in only) |
 | 16 | Circular dependencies in task graph | Topological sort validation during decomposition |
 | 17 | PRs that exceed task scope | Diff files vs predicted files → `[SCOPE:WARNING]` |
@@ -294,6 +360,30 @@ AgentFlow was designed by systematically identifying and closing 23 gaps in AI d
 | 21 | No dashboard for pipeline status | Pinned Status task updated every sweep |
 | 22 | No clean shutdown mechanism | `/sdlc-stop` drains workers, returns unstarted to backlog |
 | 23 | Spec changes mid-sprint go unnoticed | SHA-256 hash comparison, `[SPEC:CHANGED]` flag |
+| | **Superpowers Integration Gaps** | |
+| 24 | Context window war (stacked prompts) | Lazy-load prompts by task complexity |
+| 25 | Two captains (conflicting workflow control) | AgentFlow owns lifecycle, Superpowers owns methodology |
+| 26 | Sub-agents skip heartbeats | Parent worker posts heartbeats independently |
+| 27 | Plan exceeds task scope | Predicted files + acceptance criteria as hard constraints |
+| 28 | Double cost tracking (hidden sub-agent cost) | Adjusted ceilings: S=$3, M=$5, L=$8 with Superpowers |
+| 29 | Retry context fragmentation | Parent aggregates all sub-agent outputs |
+| 30 | Brainstorm overkill on simple tasks | Complexity gating: S=skip, M=plan only, L=full |
+| 31 | Conflicting review standards | AgentFlow adversarial rules override Superpowers |
+| | **Audit Finding Gaps** | |
+| 32 | No worktree cleanup | Worktree removed on Done transition |
+| 33 | Prompt version skew | Version field in conventions.md, re-read per task |
+| 34 | No merge lock | `[MERGE_LOCK]` on Status task, 10 min timeout |
+| 35 | Sub-agent git conflicts | Non-overlapping file sets; sequential fallback |
+| 36 | No orchestrator health monitoring | `[LAST_SWEEP]` timestamp + external watchdog |
+| 37 | Comment thread pollution | Read only last 10-20 comments per task |
+| 38 | Dual sweep collision | `[SWEEP:RUNNING]` mutual exclusion lock |
+| 39 | Adversarial review ping-pong | PASS WITH NOTES for minor-only issues |
+| 40 | Prompt injection | Input sanitization check at stage entry |
+| 41 | LEARNINGS.md context bomb | 50-line cap with oldest-first rotation |
+| 42 | Git revert can fail | `[INTEGRATE:REVERT_FAILED]` → Needs Human |
+| 43 | Crontab environment/auth failure | Wrapper script sources shell environment |
+| 44 | Cost ceilings assume wrong model | Dual cost profiles (Sonnet/Opus) |
+| 45 | Orchestrator cost | Idle sweep optimization, doubles interval when idle |
 
 [Full gap registry with details →](docs/gap-registry.md)
 
@@ -319,7 +409,7 @@ agentflow/
 ├── docs/                      # Documentation
 │   ├── architecture.md        # System architecture deep-dive
 │   ├── getting-started.md     # Step-by-step setup guide
-│   ├── gap-registry.md        # All 23 gaps with full details
+│   ├── gap-registry.md        # All 45 gaps with full details
 │   └── comparison.md          # Detailed competitive analysis
 ├── examples/                  # Example specs and configurations
 │   └── starter-spec.md        # Template SPEC.md to get started
@@ -358,7 +448,7 @@ AgentFlow operates on a spectrum from semi-automated to fully autonomous:
 - Task dispatch with transitive priority and conflict detection
 - Build → lint gate → review → coverage gate → test → merge → integration
 - Feedback loops with accumulated context and worker rotation
-- Cost tracking with automatic guardrails ($5 warning, $15 hard stop)
+- Cost tracking with automatic guardrails (warning at $3/$8, hard stop at $10/$20 per Sonnet/Opus profile)
 - Dead worker detection and reassignment
 - System-level learning (LEARNINGS.md retrospectives)
 - Auto-revert on integration failure
@@ -385,7 +475,7 @@ AgentFlow operates on a spectrum from semi-automated to fully autonomous:
 
 - Built with [Claude Code](https://claude.ai/code) by Anthropic
 - Inspired by the gaps in existing AI development tools
-- Designed through systematic CTO-level review (23 gaps identified and addressed)
+- Designed through systematic CTO-level review (45 gaps identified and addressed)
 
 ---
 

@@ -27,11 +27,13 @@ Check all tasks in Research/Build/Review/Test/Integrate stages:
 - Move back to "1 - Backlog"
 - Clear slot: `[SLOT:T<N>]` → `[SLOT:--]`
 - Reset stage: `[STAGE:X]` → `[STAGE:Backlog]`
+- Clean up git worktree if it exists: `git worktree remove feat/<task-code>-<slug> --force`
 
 **For tasks in Review/Test that are waiting (no worker actively processing):**
 - Move back to "1 - Backlog"
 - Clear slot
 - Reset stage
+- Clean up git worktree if it exists: `git worktree remove feat/<task-code>-<slug> --force`
 
 ### Step 3: Wait for active workers
 

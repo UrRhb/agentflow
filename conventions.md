@@ -1,5 +1,7 @@
 # AgentFlow Conventions
 
+> Version: 1
+
 > Source of truth for the entire AgentFlow pipeline. All skills, prompts, and adapters reference this document.
 
 ## Task Naming
@@ -44,6 +46,24 @@ Every task description starts with a metadata header:
 - `[RETRY:N]` — number of feedback loop iterations
 - `[COST:~$N]` — accumulated cost estimate
 
+## Regex Patterns
+
+All agents MUST use these exact patterns for parsing metadata. Do not write your own.
+
+```
+Stage: \[STAGE:(Backlog|Research|Research-Complete|Build|Build-Complete|Review|Review-Complete|Review-Rejected|Test|Test-Rejected|Integrate|Integrate-Failed|Done)\]
+Slot: \[SLOT:(--|T[2-5])\]
+Retry: \[RETRY:(\d+)\]
+Cost: \[COST:~\$(\d+(?:\.\d{2})?)\]
+Spec Hash: \[SPEC_HASH:([a-f0-9]{64})\]
+Merge Lock: \[MERGE_LOCK:(T[2-5]):([A-Z]+-\d+)\]
+Sweep Running: \[SWEEP:RUNNING (\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\]
+Last Sweep: \[LAST_SWEEP:(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})\]
+```
+
+IMPORTANT: Use word-boundary matching for STAGE to prevent substring collisions
+(e.g., "Build" must NOT match "Build-Complete").
+
 ## Comment Tags
 
 Machine-readable tags posted as Asana comments. The orchestrator and workers parse these to determine state.
@@ -57,7 +77,9 @@ Machine-readable tags posted as Asana comments. The orchestrator and workers par
 | `[BUILD:COMPLETE]` | Code written, PR created |
 | `[LINT:PASS]` | Deterministic gate passed (tsc + lint + tests) |
 | `[LINT:FAIL]` | Deterministic gate failed |
+| `[LINT:SKIP]` | Deterministic gate skipped (no tooling configured) |
 | `[REVIEW:PASS]` | AI review approved |
+| `[REVIEW:PASS_WITH_NOTES]` | AI review passed with non-blocking suggestions |
 | `[REVIEW:REJECT]` | AI review found issues |
 | `[COV:PASS]` | Coverage gate passed (≥80% on new files) |
 | `[COV:FAIL]` | Coverage below threshold |
@@ -65,14 +87,27 @@ Machine-readable tags posted as Asana comments. The orchestrator and workers par
 | `[TEST:REJECT]` | Test suite or validation failed |
 | `[INTEGRATE:PASS]` | Main branch healthy after merge |
 | `[INTEGRATE:FAIL]` | Main branch broken, auto-reverted |
+| `[INTEGRATE:REVERT_FAILED]` | Git revert conflicted, needs human |
+
+### Security Tags
+| Tag | Meaning |
+|-----|---------|
+| `[SECURITY:WARNING]` | Suspicious/injected task description detected |
+| `[SECURITY:CRITICAL]` | Code attempts to exfiltrate secrets or data |
+
+### Merge Coordination Tags
+| Tag | Meaning |
+|-----|---------|
+| `[MERGE_LOCK:T<slot>:<task>]` | Worker acquiring merge lock |
+| `[MERGE_UNLOCK:T<slot>]` | Worker releasing merge lock |
 
 ### System Tags
 | Tag | Meaning |
 |-----|---------|
 | `[HEARTBEAT]` | Worker is alive (posted every 5 min) |
 | `[REASSIGNED]` | Dead worker detected, slot cleared |
-| `[COST:WARNING]` | Task cost exceeded $5 |
-| `[COST:CRITICAL]` | Task cost exceeded $15, moved to Needs Human |
+| `[COST:WARNING]` | Task cost exceeded warning threshold (profile-dependent) |
+| `[COST:CRITICAL]` | Task cost exceeded hard stop (profile-dependent) |
 | `[BUILD:BLOCKED]` | Task evaluated as impossible after 2+ failures |
 | `[SCOPE:WARNING]` | PR modifies files outside predicted list |
 | `[SPEC:CHANGED]` | Source spec modified since decomposition |
@@ -85,6 +120,10 @@ Machine-readable tags posted as Asana comments. The orchestrator and workers par
 | `[RETROSPECTIVE]` | System-level learning cycle completed |
 | `[HOLD]` | Human placed task on hold |
 | `[RETRY:N]` | Feedback loop iteration count |
+| `[SWEEP:RUNNING <timestamp>]` | Sweep in progress (mutual exclusion) |
+| `[SWEEP:COMPLETE <timestamp>]` | Sweep finished |
+| `[LAST_SWEEP:<timestamp>]` | Embedded in Status task for health monitoring |
+| `[CONVENTIONS:UPDATED]` | Conventions document version changed |
 
 ## Task Description Template
 
@@ -146,17 +185,29 @@ A task is atomic if:
 
 ## Cost Ceilings Per Stage
 
-| Stage | Cost Ceiling | Notes |
-|-------|-------------|-------|
-| Research | ~$1.00 | Token cost for context gathering |
-| Build | ~$3.00 | Code generation + local testing |
-| Review | ~$0.50 | Reading + analysis |
-| Test | ~$1.00 | Test execution + validation |
-| Integrate | ~$0.25 | Quick suite run on main |
+### Sonnet Profile (default, recommended)
+| Stage | Without Superpowers | With Superpowers (M) | With Superpowers (L) |
+|-------|--------------------|--------------------|---------------------|
+| Research | ~$0.10 | ~$0.10 | ~$0.10 |
+| Build | ~$0.40 | ~$0.80 | ~$1.20 |
+| Review | ~$0.10 | ~$0.10 | ~$0.10 |
+| Test | ~$0.05 | ~$0.05 | ~$0.05 |
+| Integrate | ~$0.03 | ~$0.03 | ~$0.03 |
 
-**Guardrails:**
-- Warning at $5 total per task → `[COST:WARNING]`
-- Hard stop at $15 total per task → `[COST:CRITICAL]` → Needs Human
+Guardrails: Warning at $3, Hard stop at $10
+
+### Opus Profile (for complex projects)
+| Stage | Without Superpowers | With Superpowers (M) | With Superpowers (L) |
+|-------|--------------------|--------------------|---------------------|
+| Research | ~$1.00 | ~$1.00 | ~$1.50 |
+| Build | ~$3.00 | ~$5.00 | ~$8.00 |
+| Review | ~$0.50 | ~$0.50 | ~$0.50 |
+| Test | ~$1.00 | ~$1.00 | ~$1.00 |
+| Integrate | ~$0.25 | ~$0.25 | ~$0.25 |
+
+Guardrails: Warning at $8, Hard stop at $20
+
+Select profile during `/spec-to-asana` setup. Default: Sonnet.
 
 ## Dispatch Priority
 
@@ -199,3 +250,10 @@ Before creating tasks in the PM tool, the decomposition must pass:
 3. **File conflict check**: Parallel tasks don't share predicted files
 4. **Atomicity check**: No task modifies >5 files
 5. **Verification syntax check**: Every verification command is valid shell
+
+## LEARNINGS.md Management
+
+- Maximum 50 lines / 30 patterns
+- When adding new patterns, if file exceeds 50 lines, remove oldest patterns from the top
+- Workers read only the most recent 30 patterns (bottom of file) if file is large
+- Format: each pattern is exactly: `## Pattern: <name>\n**Frequency:** ...\n**Fix:** ...\n**Added:** ...`

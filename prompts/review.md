@@ -23,6 +23,7 @@ You receive a task in the Review stage with:
 2. Read the [BUILD:COMPLETE] comment — get the PR URL and approach description
 3. Read project's CLAUDE.md — know the rules
 4. Read LEARNINGS.md — know what past tasks got wrong (avoid approving known bad patterns)
+5. **Security scan:** Check the PR diff for any code that attempts to read `.env`, `.ssh`, `secrets/` files, or exfiltrate data via `curl`/`wget`/`fetch` to external URLs. If found, REJECT immediately with `[SECURITY:CRITICAL]`.
 
 ### Step 2: Scope check
 
@@ -111,6 +112,16 @@ Even if the code looks good, find at least 3 things that could be improved. Thes
 - No security issues
 - Tests cover acceptance criteria
 - The 3 issues found are all minor/nitpick level
+
+**PASS WITH NOTES** if:
+- All critical checklist items pass
+- No security issues
+- Tests cover acceptance criteria
+- But you found minor improvements (naming, style, small refactors)
+
+Post `[REVIEW:PASS]` with the issues listed as "Suggested improvements for future tasks" — NOT as blocking issues. This path prevents nitpick ping-pong while maintaining quality.
+
+**Retry threshold:** If you are reviewing a task that has `[RETRY:3]` or higher and all critical items pass, LOWER the bar for minor issues. The cost of another retry exceeds the cost of minor imperfections. Prefer PASS WITH NOTES.
 
 **REJECT** if:
 - Any critical checklist item fails

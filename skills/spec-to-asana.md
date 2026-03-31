@@ -37,6 +37,8 @@ If no argument provided, ask the user:
 
 3. **Read package.json**: Get current dependencies (needed for research trigger evaluation).
 
+4. **Select model cost profile**: Ask the user: "Which Claude model will workers use? (sonnet/opus)" This sets the cost profile in conventions.md (affects cost ceilings and guardrails).
+
 ### Phase 3: Decompose
 
 Read the decomposition prompt: `prompts/decompose.md`
@@ -56,6 +58,7 @@ Run the decomposition validator (from decompose.md) BEFORE creating anything in 
 3. **File conflict check**: Parallel tasks don't share files
 4. **Atomicity check**: No task modifies > 5 files
 5. **Verification command check**: All commands are valid bash
+6. **Safety check**: All verification commands use only safe commands (npm, npx, node, curl localhost). No external URLs, no `rm -rf`, no `eval`, no `sudo`.
 
 If validation fails, fix the decomposition. Do NOT proceed with invalid tasks.
 
