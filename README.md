@@ -343,6 +343,44 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for guidelines.
 
 MIT License. See [LICENSE](LICENSE).
 
+## Automation Levels
+
+AgentFlow operates on a spectrum from semi-automated to fully autonomous:
+
+| Level | What You Do | What AgentFlow Does |
+|-------|------------|-------------------|
+| **Manual** | Write SPEC.md | — |
+| **Semi-automated** | Run `/spec-to-asana`, open worker terminals, set crontab | Decomposes spec, creates board, validates tasks |
+| **Autonomous** | Watch from your phone, handle "Needs Human" cards | Everything else — dispatch, build, review, test, merge, revert, retry, learn |
+
+### What's autonomous today
+- Orchestrator sweeps (crontab-driven, no human in the loop)
+- Task dispatch with transitive priority and conflict detection
+- Build → lint gate → review → coverage gate → test → merge → integration
+- Feedback loops with accumulated context and worker rotation
+- Cost tracking with automatic guardrails ($5 warning, $15 hard stop)
+- Dead worker detection and reassignment
+- System-level learning (LEARNINGS.md retrospectives)
+- Auto-revert on integration failure
+- Spec drift detection
+- Graceful shutdown
+
+### What's still manual
+- Starting worker terminals (you open 3-4 iTerm tabs)
+- Writing the initial SPEC.md
+- Handling "Needs Human" cards (blocked tasks, cost-critical, spec changes)
+- Adjusting crontab frequency
+
+## Roadmap
+
+- [ ] **Auto-spawn workers**: Orchestrator detects empty slots and spawns worker sessions automatically via `claude -p "/sdlc-worker --slot T<N>"`
+- [ ] **GitHub Projects adapter**: Free alternative to Asana — no paid PM tool required
+- [ ] **Linear adapter**: For teams already on Linear
+- [ ] **Web dashboard**: Real-time pipeline visualization beyond the Kanban board
+- [ ] **Multi-language support**: Python, Go, Rust project conventions (currently Node.js/TypeScript focused)
+- [ ] **Slack/Discord notifications**: Pipeline events pushed to team channels
+- [ ] **Cost analytics**: Historical cost data, trends, and optimization suggestions
+
 ## Acknowledgments
 
 - Built with [Claude Code](https://claude.ai/code) by Anthropic
