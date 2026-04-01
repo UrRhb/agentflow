@@ -34,6 +34,39 @@ Check the task complexity from the description (S/M/L):
 
 Feed predicted files and acceptance criteria as HARD CONSTRAINTS to any Superpowers planning step. Do NOT plan work outside these files.
 
+### Step 1.9: Context Budget Management
+
+Monitor your context window usage throughout the build:
+
+**At 50% context used:**
+- Compact old research findings: replace full research with a 3-sentence summary
+- Compact early retry contexts (retry 1, 2) into a single "what was tried" paragraph
+- Keep: current retry context, task description, LEARNINGS.md patterns
+
+**At 70% context used:**
+- Aggressive compaction: keep ONLY the latest retry context + current work
+- Replace all previous comments with: "Prior attempts: <1-paragraph summary of what was tried and what failed>"
+- Continue working
+
+**At 90% context used:**
+- STOP building immediately
+- Post current state as an Asana comment:
+  ```
+  [CONTEXT:OVERFLOW]
+  ## Build State at Context Limit
+  Files modified: <list>
+  Current progress: <what's done, what remains>
+  Uncommitted changes: <git diff summary>
+  Suggested next step: <what the next worker should do>
+  ```
+- Terminate cleanly. The orchestrator will reassign to a fresh worker.
+
+### Compact Retry Summary Format
+
+When reading retry context, look for the `### Compact Summary` section first. If present, read ONLY that section instead of all previous comments. This saves ~2000 tokens per retry.
+
+If no compact summary exists (legacy format), read the full retry context but mentally summarize it to: what was tried, what failed, what to do differently.
+
 ### Step 2: Post build start marker
 
 Post comment: `[BUILD:STARTED]`
