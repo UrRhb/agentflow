@@ -23,19 +23,22 @@ The original architecture. Workers are separate terminal sessions, orchestrator 
 ### Plugin Mode (v2)
 Workers spawn as a named agent team inside Claude Code. The orchestrator creates the team, dispatches via SendMessage for instant handoffs, and hooks enforce quality gates at the tool level.
 
-```
-Standalone:                          Plugin:
-┌──────────┐                         ┌──────────┐
-│ Crontab  │                         │Orchestrat│
-│ (sweep)  │                         │  (agent) │
-└────┬─────┘                         └────┬─────┘
-     │                                    │
-     │ reads/writes Asana                 │ TeamCreate + SendMessage
-     │                                    │
-┌────┴────┐ ┌────┐ ┌────┐          ┌────┴────┐ ┌────┐ ┌────┐
-│T2 (term)│ │T3  │ │T4  │          │T2 (agent│ │T3  │ │T4  │
-│ manual  │ │    │ │    │          │ spawned)│ │    │ │    │
-└─────────┘ └────┘ └────┘          └─────────┘ └────┘ └────┘
+```mermaid
+graph TB
+    subgraph standalone["Standalone Mode (v1)"]
+        CR["Crontab<br/>(sweep)"] -->|reads/writes Asana| KB1["Kanban Board"]
+        CR -->|dispatches| T2a["T2 (terminal)"]
+        CR -->|dispatches| T3a["T3 (terminal)"]
+        CR -->|dispatches| T4a["T4 (terminal)"]
+    end
+    
+    subgraph plugin["Plugin Mode (v2)"]
+        OR["Orchestrator<br/>(agent)"] -->|"TeamCreate + SendMessage"| KB2["Kanban Board"]
+        OR -->|spawns| T2b["T2 (agent)"]
+        OR -->|spawns| T3b["T3 (agent)"]
+        OR -->|spawns| T4b["T4 (agent)"]
+        T2b <-->|SendMessage| T4b
+    end
 ```
 
 ### What Changes in Plugin Mode
@@ -55,9 +58,9 @@ Plugin mode adds 3 hooks that enforce quality gates at the tool level:
 
 | Hook | Event | What it does |
 |---|---|---|
-| **lint-gate** | PreToolUse (Bash) | Blocks `git commit`/`gh pr create` unless tsc+lint+tests pass |
-| **coverage-gate** | Stop (tester) | Blocks tester completion unless >=80% coverage on new files |
-| **scope-guard** | PreToolUse (Edit/Write) | Warns on unpredicted files, blocks on 3rd |
+| **lint-gate** | PreToolUse on Bash | Blocks commit without tsc/lint/test |
+| **coverage-gate** | Stop on tester | Blocks merge without 80% coverage |
+| **scope-guard** | PreToolUse on Edit/Write | Warns then blocks unpredicted files |
 
 ## System Components
 
@@ -65,7 +68,7 @@ Plugin mode adds 3 hooks that enforce quality gates at the tool level:
 
 A **stateless, one-shot sweep** that runs via real crontab — not a daemon, not a session-based scheduler.
 
-```
+```bash
 */15 * * * * ~/.claude/sdlc/agentflow-cron.sh >> /tmp/agentflow-orchestrate.log 2>&1
 ```
 
@@ -98,9 +101,9 @@ Workers are stateless between tasks. When a worker finishes one task, it checks 
 
 The board has 8 columns (sections):
 
-```
-0 - Needs Human  │  1 - Backlog  │  2 - Research  │  3 - Build
-4 - Review        │  5 - Test     │  6 - Integrate │  7 - Done
+```mermaid
+graph LR
+    S0["0 - Needs Human"] --- S1["1 - Backlog"] --- S2["2 - Research"] --- S3["3 - Build"] --- S4["4 - Review"] --- S5["5 - Test"] --- S6["6 - Integrate"] --- S7["7 - Done"]
 ```
 
 **State is stored in two places:**
@@ -113,15 +116,16 @@ The board has 8 columns (sections):
 
 Before any AI review happens, deterministic checks run:
 
-```
-tsc --noEmit → eslint → npm test
+```mermaid
+graph LR
+    TSC["tsc --noEmit"] --> ESLINT["eslint"] --> TEST["npm test"]
 ```
 
 This catches ~60% of issues (type errors, lint violations, failing tests) at near-zero cost. Only code that passes all three gates reaches the AI reviewer.
 
 **After review**, a coverage gate runs:
 
-```
+```bash
 npm test -- --coverage
 ```
 
@@ -152,43 +156,26 @@ This means the system gets better over time — mistakes made in task 5 are avoi
 
 ## Data Flow
 
-```
-SPEC.md
-    │
-    ▼
-/spec-to-asana (decompose + validate + create)
-    │
-    ▼
-Kanban Board (Asana)
-    │
-    ├── Orchestrator reads state every 15 min
-    │   ├── Detects transitions (comment tags)
-    │   ├── Moves cards between columns
-    │   ├── Assigns slots to ready tasks
-    │   └── Updates status dashboard
-    │
-    ├── Worker T2 reads assigned task
-    │   ├── Executes build prompt
-    │   ├── Posts [BUILD:STARTED] + [HEARTBEAT]
-    │   ├── Creates PR
-    │   ├── Runs lint gate
-    │   └── Posts [BUILD:COMPLETE] + [LINT:PASS]
-    │
-    ├── Worker T4 reads task in Review
-    │   ├── Executes adversarial review prompt
-    │   ├── Checks scope (diff vs predicted files)
-    │   └── Posts [REVIEW:PASS] or [REVIEW:REJECT]
-    │
-    ├── Worker T5 reads task in Test
-    │   ├── Runs full test suite
-    │   ├── Checks coverage
-    │   ├── Merges PR
-    │   └── Runs integration check on main
-    │
-    └── Human reads board on phone
-        ├── Sees real-time pipeline status
-        ├── Reads agent comments/decisions
-        └── Can drag cards to intervene
+```mermaid
+graph TB
+    SPEC["SPEC.md"] --> STA["/spec-to-asana<br/>(decompose + validate + create)"]
+    STA --> KB["Kanban Board (Asana)"]
+    
+    KB --> ORCH["Orchestrator<br/>(every 15 min)"]
+    ORCH --> |"detects transitions"| KB
+    ORCH --> |"assigns slots"| KB
+    
+    KB --> W2["Worker T2<br/>(Build)"]
+    W2 --> |"[BUILD:COMPLETE]<br/>+ PR link"| KB
+    
+    KB --> W4["Worker T4<br/>(Review)"]
+    W4 --> |"[REVIEW:PASS]<br/>or [REVIEW:REJECT]"| KB
+    
+    KB --> W5["Worker T5<br/>(Test + Merge)"]
+    W5 --> |"[TEST:PASS]<br/>merge PR"| KB
+    
+    KB --> HUMAN["Human<br/>(phone/web)"]
+    HUMAN --> |"drag card to intervene"| KB
 ```
 
 ## Superpowers Integration Layer
@@ -197,18 +184,14 @@ AgentFlow can optionally integrate with [Superpowers](https://github.com/NickBod
 
 ### Two-Layer Model
 
-```
-┌─────────────────────────────────────────────────────────────┐
-│  OUTER LOOP — AgentFlow (Lifecycle Owner)                   │
-│  Owns: dispatch, heartbeat, tags, transitions, cost, retry  │
-│                                                              │
-│  ┌─────────────────────────────────────────────────────────┐ │
-│  │  INNER LOOP — Superpowers (Methodology Owner)           │ │
-│  │  Owns: brainstorm, plan, sub-agents, TDD, verification  │ │
-│  │  Reads: predicted files, acceptance criteria (as limits) │ │
-│  │  Cannot: skip tags, exceed scope, override cost limits   │ │
-│  └─────────────────────────────────────────────────────────┘ │
-└─────────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph outer["OUTER LOOP — AgentFlow (Lifecycle Owner)"]
+        OL["dispatch • heartbeat • tags • transitions • cost • retry"]
+        subgraph inner["INNER LOOP — Superpowers (Methodology Owner)"]
+            IL["brainstorm → plan → sub-agents → TDD → verification"]
+        end
+    end
 ```
 
 **AgentFlow** controls WHEN things happen (start, complete, heartbeat, retry, cost check).
@@ -306,24 +289,13 @@ Guardrails: Warning at $8, Hard stop at $20
 
 AgentFlow uses adapters to abstract the PM tool interface:
 
-```
-AgentFlow Core (skills + prompts + conventions)
-    │
-    ▼
-Adapter Interface
-    ├── create_project(name, sections)
-    ├── create_task(project, section, description)
-    ├── move_task(task, section)
-    ├── add_comment(task, body)
-    ├── get_comments(task)
-    ├── search_tasks(query)
-    ├── update_task_description(task, description)
-    └── get_sections(project)
-    │
-    ├── Asana Adapter (MCP) ← available
-    ├── GitHub Projects Adapter ← planned
-    ├── Linear Adapter ← planned
-    └── Jira Adapter ← planned
+```mermaid
+graph TB
+    CORE["AgentFlow Core<br/>(skills + prompts + conventions)"] --> AI["Adapter Interface"]
+    AI --> ASANA["Asana Adapter (MCP)<br/>✅ available"]
+    AI --> GH["GitHub Projects Adapter<br/>📋 planned"]
+    AI --> LIN["Linear Adapter<br/>📋 planned"]
+    AI --> JIRA["Jira Adapter<br/>📋 planned"]
 ```
 
 Each adapter maps these operations to the specific PM tool's API. The core skills and prompts never reference a specific tool — they use the adapter interface.
