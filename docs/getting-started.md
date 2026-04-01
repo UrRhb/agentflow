@@ -9,7 +9,11 @@
 ### Plugin Mode (Recommended)
 If you have Claude Code installed:
 
-1. Install the plugin: `./setup.sh` (select plugin when prompted)
+1. Add the marketplace and install:
+   ```bash
+   claude plugin marketplace add UrRhb/agentflow
+   claude plugin install agentflow
+   ```
 2. Create your spec and decompose: `claude -p "/spec-to-board"`
 3. Start the pipeline: `claude -p "/sdlc-orchestrate"`
 4. Workers spawn automatically — no iTerm tabs needed!
@@ -17,7 +21,7 @@ If you have Claude Code installed:
 ### Standalone Mode
 If you prefer manual control:
 
-1. Install: `./setup.sh --with-cron`
+1. Run the setup script: `./setup.sh --with-cron`
 2. Create your spec and decompose: `claude -p "/spec-to-asana"`
 3. Open worker terminals: `claude -p "/sdlc-worker --slot T2"` (repeat for T3-T5)
 4. Orchestrator runs via crontab every 15 minutes

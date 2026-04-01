@@ -12,6 +12,12 @@
     <a href="docs/gap-registry.md">Gap Registry</a> &bull;
     <a href="#comparison">Comparison</a>
   </p>
+  <p align="center">
+    <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg" alt="MIT License" /></a>
+    <a href="https://github.com/UrRhb/agentflow/stargazers"><img src="https://img.shields.io/github/stars/UrRhb/agentflow?style=social" alt="Stars" /></a>
+    <img src="https://img.shields.io/badge/version-2.0.0-green.svg" alt="Version 2.0.0" />
+    <img src="https://img.shields.io/badge/claude%20code-plugin-8B5CF6.svg" alt="Claude Code Plugin" />
+  </p>
 </p>
 
 ---
@@ -70,24 +76,23 @@ You don't need to trust a black box. Open your Kanban board and watch the pipeli
 
 ## Architecture
 
-```
-                    ┌─────────────────────────────────────────────┐
-                    │           Your Kanban Board (Asana)          │
-                    │                                             │
-  Crontab runs      │  Backlog → Research → Build → Review → ...  │
-  every 15 min      │     ↑                            │          │
-       │            │     │     Needs Human ←──────────┘          │
-       ▼            │     │         (drag card to intervene)      │
-  ┌──────────┐      └─────┼───────────────────────────────────────┘
-  │Orchestrate│           │
-  │ (sweep)   │───reads───┘
-  └──────────┘
-       │            ┌──────────┐  ┌──────────┐  ┌──────────┐
-       └─dispatches─│ Worker T2 │  │ Worker T3 │  │ Worker T4 │ ...
-                    │ (Build)   │  │ (Build)   │  │ (Review)  │
-                    └──────────┘  └──────────┘  └──────────┘
-                         │              │              │
-                         └──── all state flows through Kanban ────┘
+```mermaid
+graph TB
+    subgraph board["Your Kanban Board"]
+        B[Backlog] --> R[Research] --> BU[Build] --> RE[Review] --> T[Test] --> I[Integrate] --> D[Done]
+        RE -->|reject| BU
+        T -->|fail| BU
+        I -->|fail| BU
+        NH[Needs Human] -.->|drag card| B
+    end
+    
+    CR["Crontab (every 15 min)"] -->|reads state| board
+    CR -->|dispatches| W2["Worker T2 (Build)"]
+    CR -->|dispatches| W3["Worker T3 (Build)"]
+    CR -->|dispatches| W4["Worker T4 (Review)"]
+    CR -->|dispatches| W5["Worker T5 (Test)"]
+    
+    W2 & W3 & W4 & W5 -->|"state flows through"| board
 ```
 
 **Core principle:** The Kanban board IS the orchestration layer. No separate database, no message queue, no custom infrastructure. State lives where humans already look.
@@ -119,12 +124,15 @@ cp agentflow/conventions.md ~/.claude/sdlc/conventions.md
 If you're using Claude Code, install AgentFlow as a native plugin for automatic worker spawning, instant handoffs, and infrastructure-level quality gates:
 
 ```bash
-# Install the plugin
-claude plugins install agentflow
+# Add the AgentFlow marketplace
+claude plugin marketplace add UrRhb/agentflow
 
-# Or manually: clone and link
+# Install the plugin
+claude plugin install agentflow
+
+# Or manually:
 git clone https://github.com/UrRhb/agentflow.git
-cp -r agentflow/plugin ~/.claude/plugins/agentflow
+cd agentflow && ./setup.sh
 ```
 
 **Plugin mode gives you:**
@@ -223,37 +231,29 @@ Claude: Graceful shutdown initiated. Active workers finishing...
 
 ### Task Lifecycle
 
-```
-[SLOT:--] [STAGE:Backlog] [RETRY:0] [COST:~$0]
-    │
-    ├── Orchestrator assigns slot → [SLOT:T2] [STAGE:Build]
-    │
-    ├── Worker T2 builds → posts [BUILD:COMPLETE] with PR link
-    │
-    ├── Lint gate: tsc + eslint + tests → [LINT:PASS]
-    │
-    ├── Worker T4 reviews → finds 3 issues → all acceptable → [REVIEW:PASS]
-    │
-    ├── Coverage gate → [COV:PASS]
-    │
-    ├── Worker T5 tests → [TEST:PASS] → merges PR
-    │
-    ├── Integration check on main → [INTEGRATE:PASS]
-    │
-    └── [STAGE:Done] [COST:~$5.75]
+```mermaid
+graph LR
+    A["[SLOT:--] Backlog"] -->|assign T2| B["[SLOT:T2] Build"]
+    B -->|"PR created"| C["Lint Gate: tsc + eslint + tests"]
+    C -->|LINT:PASS| D["Review (T4)"]
+    D -->|"3 issues, all minor"| E["Coverage Gate"]
+    E -->|COV:PASS| F["Test (T5)"]
+    F -->|TEST:PASS| G["Merge PR"]
+    G --> H["Integration Check"]
+    H -->|INTEGRATE:PASS| I["Done [$5.75]"]
 ```
 
 ### What Happens When Things Fail
 
-```
-[REVIEW:REJECT] "SQL injection in user input handler"
-    │
-    ├── Retry counter increments → [RETRY:1]
-    ├── Accumulated context posted (what was tried, what failed, what to do differently)
-    ├── Slot cleared → different worker assigned on retry 2+
-    ├── Task moves back to Build
-    │
-    └── If cost exceeds hard stop threshold → [COST:CRITICAL] → moves to "Needs Human"
+```mermaid
+graph TD
+    REJ["REVIEW:REJECT<br/>'SQL injection in user input'"] --> R1["RETRY:1"]
+    R1 --> CTX["Accumulated context posted"]
+    CTX --> SLOT["Slot cleared, different worker assigned"]
+    SLOT --> BACK["Task moves back to Build"]
+    BACK --> COST{"Cost > hard stop?"}
+    COST -->|Yes| HUMAN["COST:CRITICAL → Needs Human"]
+    COST -->|No| REBUILD["New worker rebuilds with retry context"]
 ```
 
 ## Comparison
@@ -292,22 +292,21 @@ Claude: Graceful shutdown initiated. Active workers finishing...
 
 AgentFlow and [Superpowers](https://github.com/obra/superpowers) operate at **different layers** and are designed to stack:
 
-```
-┌───────────────────────────────────────────────────────────┐
-│  OUTER LOOP — AgentFlow                                    │
-│  "Which task should which agent work on, and when?"        │
-│  Kanban board • dispatch • transitions • cost gates        │
-│                                                            │
-│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐        │
-│  │  Worker T2   │  │  Worker T3   │  │  Worker T4   │       │
-│  │  INNER LOOP  │  │  INNER LOOP  │  │  INNER LOOP  │       │
-│  │  Superpowers │  │  Superpowers │  │  Superpowers │       │
-│  │  brainstorm  │  │  brainstorm  │  │  code-review │       │
-│  │  → plan      │  │  → plan      │  │  + adversary │       │
-│  │  → execute   │  │  → execute   │  │    rules     │       │
-│  │  → verify    │  │  → verify    │  │              │       │
-│  └─────────────┘  └─────────────┘  └─────────────┘        │
-└───────────────────────────────────────────────────────────┘
+```mermaid
+graph TB
+    subgraph outer["OUTER LOOP — AgentFlow"]
+        direction TB
+        OL["Kanban board • dispatch • transitions • cost gates"]
+        subgraph w2["Worker T2"]
+            SP2["Superpowers: brainstorm → plan → execute → verify"]
+        end
+        subgraph w3["Worker T3"]
+            SP3["Superpowers: brainstorm → plan → execute → verify"]
+        end
+        subgraph w4["Worker T4"]
+            SP4["Superpowers: code-review + adversary rules"]
+        end
+    end
 ```
 
 **AgentFlow** decides: *"Task APP-007 goes to Worker T2 now"*
@@ -425,44 +424,61 @@ AgentFlow was designed by systematically identifying and closing 45 gaps in AI d
 
 ```
 agentflow/
-├── core/                      # Shared logic (standalone + plugin)
-│   ├── skills/                # Claude Code skill files (copy to ~/.claude/skills/)
-│   │   ├── spec-to-asana.md   # Decompose spec → Kanban tasks
-│   │   ├── sdlc-worker.md     # Execute pipeline stages
-│   │   ├── sdlc-orchestrate.md# Stateless orchestration sweep
-│   │   └── sdlc-stop.md       # Graceful shutdown
-│   └── prompts/               # Stage-specific prompt templates
-│       ├── decompose.md       # Spec → atomic tasks
-│       ├── research.md        # Conditional research stage
-│       ├── build.md           # Build with lint gate
-│       ├── review.md          # Adversarial review
-│       └── test.md            # Test + integration
-├── plugin/                    # Claude Code native plugin
-│   ├── plugin.json            # Plugin manifest
-│   ├── .mcp.json              # MCP server configuration
-│   ├── commands/              # Slash commands (/sdlc-orchestrate, etc.)
-│   ├── agents/                # Subagent definitions (workers, reviewer)
-│   ├── hooks/                 # Pre/post tool-use hooks (quality gates)
-│   └── skills/                # Plugin-specific skills
-├── bin/                       # CLI scripts and crontab wrapper
-│   └── agentflow-cron.sh      # Crontab wrapper for standalone mode
-├── skills/                    # Legacy skill files (symlinks to core/)
-├── prompts/                   # Legacy prompt files (symlinks to core/)
-├── conventions.md             # System conventions and protocols
-├── adapters/                  # PM tool adapters
-│   ├── asana/                 # Asana MCP adapter (available)
-│   └── github-projects/       # GitHub Projects adapter (planned)
-├── docs/                      # Documentation
-│   ├── architecture.md        # System architecture deep-dive
-│   ├── getting-started.md     # Step-by-step setup guide
-│   ├── gap-registry.md        # All 45 gaps with full details
-│   └── comparison.md          # Detailed competitive analysis
-├── examples/                  # Example specs and configurations
-│   └── starter-spec.md        # Template SPEC.md to get started
-├── setup.sh                   # Setup script (detects plugin support)
-├── CONTRIBUTING.md            # How to contribute
-├── LICENSE                    # MIT
-└── README.md                  # You are here
+├── core/                          # Portable logic (works with any AI IDE)
+│   ├── prompts/                   # Stage-specific prompt templates
+│   │   ├── decompose.md           # Spec → atomic tasks
+│   │   ├── research.md            # Conditional research stage
+│   │   ├── build.md               # Build with lint gate + context compaction
+│   │   ├── review.md              # Adversarial review
+│   │   └── test.md                # Test + integration
+│   ├── conventions.md             # System conventions v2
+│   └── adapters/                  # PM tool adapter interface
+│       ├── interface.md           # Adapter contract definition
+│       ├── asana/                 # Asana MCP adapter
+│       └── github-projects/       # GitHub Projects adapter (planned)
+│
+├── plugin/                        # Claude Code native plugin
+│   ├── .claude-plugin/
+│   │   └── plugin.json            # Plugin manifest
+│   ├── .mcp.json                  # MCP auto-configuration
+│   ├── agents/                    # Worker agent definitions
+│   │   ├── sdlc-orchestrator.md   # Fleet commander (haiku)
+│   │   ├── sdlc-builder.md        # Code writer (sonnet)
+│   │   ├── sdlc-reviewer.md       # Adversarial reviewer (sonnet, read-only)
+│   │   └── sdlc-tester.md         # Test + merge agent (sonnet)
+│   ├── hooks/                     # Infrastructure-level quality gates
+│   │   ├── lint-gate.md           # Blocks commit without tsc/lint/test
+│   │   ├── coverage-gate.md       # Blocks merge without 80% coverage
+│   │   └── scope-guard.md         # Warns/blocks unpredicted file edits
+│   └── skills/                    # Plugin-aware skills (auto-discovered)
+│       ├── spec-to-board/SKILL.md
+│       ├── sdlc-orchestrate/SKILL.md
+│       ├── sdlc-worker/SKILL.md
+│       ├── sdlc-stop/SKILL.md
+│       ├── sdlc-health/SKILL.md
+│       └── sdlc-demo/SKILL.md
+│
+├── bin/
+│   └── agentflow-cron.sh          # Standalone crontab wrapper
+├── skills/                        # Standalone skill files (v1 compat)
+├── prompts/                       # Standalone prompt files (v1 compat)
+├── conventions.md                 # Root conventions (v1 compat)
+├── docs/
+│   ├── architecture.md
+│   ├── getting-started.md
+│   ├── gap-registry.md
+│   ├── comparison.md
+│   └── patterns/                  # Patterns from Claude Code source
+│       ├── coordinator.md
+│       ├── progress-tracker.md
+│       ├── permission-classifiers.md
+│       ├── streaming-status.md
+│       ├── complexity-gating.md
+│       └── context-compaction.md
+├── setup.sh                       # Install script (detects plugin support)
+├── README.md
+├── CONTRIBUTING.md
+└── LICENSE
 ```
 
 ## Contributing
@@ -510,7 +526,7 @@ AgentFlow operates on a spectrum from semi-automated to fully autonomous:
 
 ## Roadmap
 
-- [ ] **Auto-spawn workers**: Orchestrator detects empty slots and spawns worker sessions automatically via `claude -p "/sdlc-worker --slot T<N>"`
+- [x] **Auto-spawn workers**: Plugin mode creates agent teams automatically via TeamCreate
 - [ ] **GitHub Projects adapter**: Free alternative to Asana — no paid PM tool required
 - [ ] **Linear adapter**: For teams already on Linear
 - [ ] **Web dashboard**: Real-time pipeline visualization beyond the Kanban board
@@ -530,8 +546,4 @@ AgentFlow operates on a spectrum from semi-automated to fully autonomous:
   <strong>AgentFlow</strong> — Your Kanban board builds your code.
   <br/>
   <sub>Autonomous AI development pipeline with full observability, deterministic quality gates, and cost tracking.</sub>
-  <br/><br/>
-  <a href="https://github.com/UrRhb/agentflow/stargazers">
-    <img src="https://img.shields.io/github/stars/UrRhb/agentflow?style=social" alt="GitHub Stars" />
-  </a>
 </p>
