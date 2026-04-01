@@ -1,0 +1,16 @@
+{
+  "name": "agentflow-marketplace",
+  "owner": {
+    "name": "UrRhb",
+    "email": "habeeb@agentflow.dev"
+  },
+  "plugins": [
+    {
+      "id": "agentflow",
+      "name": "AgentFlow",
+      "source": "../plugin",
+      "category": "development",
+      "description": "Autonomous AI development pipeline using your Kanban board as the orchestration layer. Spawns builder, reviewer, and tester agents as a team with instant handoffs and infrastructure-level quality gates."
+    }
+  ]
+}
