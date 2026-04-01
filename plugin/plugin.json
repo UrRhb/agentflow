@@ -2,26 +2,11 @@
   "name": "agentflow",
   "version": "2.0.0",
   "description": "Autonomous AI development pipeline using your Kanban board as the orchestration layer. Spawns builder, reviewer, and tester agents as a team with instant handoffs and infrastructure-level quality gates.",
-  "author": "UrRhb",
+  "author": {
+    "name": "UrRhb",
+    "url": "https://github.com/UrRhb"
+  },
   "license": "MIT",
   "homepage": "https://github.com/UrRhb/agentflow",
-  "agents": [
-    "agents/sdlc-orchestrator.md",
-    "agents/sdlc-builder.md",
-    "agents/sdlc-reviewer.md",
-    "agents/sdlc-tester.md"
-  ],
-  "hooks": [
-    "hooks/lint-gate.md",
-    "hooks/coverage-gate.md",
-    "hooks/scope-guard.md"
-  ],
-  "skills": [
-    "skills/spec-to-board.md",
-    "skills/sdlc-worker.md",
-    "skills/sdlc-orchestrate.md",
-    "skills/sdlc-stop.md",
-    "skills/sdlc-health.md",
-    "skills/sdlc-demo.md"
-  ]
+  "repository": "https://github.com/UrRhb/agentflow"
 }
