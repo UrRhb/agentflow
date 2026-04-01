@@ -1,6 +1,6 @@
 # AgentFlow Conventions
 
-> Version: 1
+> Version: 2
 
 > Source of truth for the entire AgentFlow pipeline. All skills, prompts, and adapters reference this document.
 
@@ -257,3 +257,43 @@ Before creating tasks in the PM tool, the decomposition must pass:
 - When adding new patterns, if file exceeds 50 lines, remove oldest patterns from the top
 - Workers read only the most recent 30 patterns (bottom of file) if file is large
 - Format: each pattern is exactly: `## Pattern: <name>\n**Frequency:** ...\n**Fix:** ...\n**Added:** ...`
+
+## Plugin Mode
+
+AgentFlow v2 supports two execution modes:
+
+### Standalone Mode (v1 compatible)
+- Workers: separate terminal sessions (`claude -p "/sdlc-worker --slot T<N>"`)
+- Orchestrator: crontab every 15 minutes
+- Communication: Asana comments only
+- Gates: prompt-enforced
+
+### Plugin Mode (v2)
+- Workers: spawned as agent team via TeamCreate
+- Orchestrator: runs as sdlc-orchestrator agent
+- Communication: SendMessage (fast) + Asana comments (durable)
+- Gates: hook-enforced (lint-gate, coverage-gate, scope-guard)
+
+### Mode Detection
+Skills detect mode by checking tool availability:
+- `TeamCreateTool` available → plugin mode
+- `SendMessageTool` available → plugin mode
+- Neither available → standalone mode
+
+### Dual Communication Protocol
+In plugin mode, workers use BOTH channels:
+1. **SendMessage** for instant handoffs and progress (ephemeral, agent-to-agent)
+2. **Asana comments** for structured tags and audit trail (durable, human-visible)
+
+If SendMessage fails, fall back to Asana-only communication. The orchestrator's next sweep recovers from Asana state.
+
+## New Comment Tags (v2)
+
+| Tag | Meaning |
+|-----|---------|
+| `[CONTEXT:OVERFLOW]` | Worker hit context window limit, state posted, needs reassignment |
+| `[SCOPE:CRITICAL]` | 3+ unpredicted files, needs human review |
+
+## Updated Gap Registry
+
+Gaps 46-51 address plugin mode failure modes. See `docs/gap-registry.md`.
