@@ -8,18 +8,5 @@
   },
   "license": "MIT",
   "homepage": "https://github.com/UrRhb/agentflow",
-  "agents": [
-    "./agents/sdlc-orchestrator.md",
-    "./agents/sdlc-builder.md",
-    "./agents/sdlc-reviewer.md",
-    "./agents/sdlc-tester.md"
-  ],
-  "skills": [
-    "./skills/spec-to-board.md",
-    "./skills/sdlc-worker.md",
-    "./skills/sdlc-orchestrate.md",
-    "./skills/sdlc-stop.md",
-    "./skills/sdlc-health.md",
-    "./skills/sdlc-demo.md"
-  ]
+  "repository": "https://github.com/UrRhb/agentflow"
 }
