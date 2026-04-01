@@ -4,6 +4,24 @@
 >
 > **Expected cost:** $44-200 per 14-task sprint depending on model choice (Sonnet vs Opus) and Superpowers usage. See [Architecture - Cost Model](architecture.md#cost-model) for details.
 
+## Choose Your Mode
+
+### Plugin Mode (Recommended)
+If you have Claude Code installed:
+
+1. Install the plugin: `./setup.sh` (select plugin when prompted)
+2. Create your spec and decompose: `claude -p "/spec-to-board"`
+3. Start the pipeline: `claude -p "/sdlc-orchestrate"`
+4. Workers spawn automatically — no iTerm tabs needed!
+
+### Standalone Mode
+If you prefer manual control:
+
+1. Install: `./setup.sh --with-cron`
+2. Create your spec and decompose: `claude -p "/spec-to-asana"`
+3. Open worker terminals: `claude -p "/sdlc-worker --slot T2"` (repeat for T3-T5)
+4. Orchestrator runs via crontab every 15 minutes
+
 ## Prerequisites
 
 | Requirement | Why |

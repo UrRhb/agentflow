@@ -13,6 +13,52 @@ AgentFlow doesn't build a separate database, message queue, or custom infrastruc
 - **Human override at any point**: Drag a card to "Needs Human" to intervene
 - **Audit trail built-in**: Every agent decision is a comment on the task card
 
+## v2 Architecture: Dual-Mode
+
+AgentFlow v2 supports two execution modes from the same codebase:
+
+### Standalone Mode (v1)
+The original architecture. Workers are separate terminal sessions, orchestrator runs via crontab, all communication flows through Asana comments.
+
+### Plugin Mode (v2)
+Workers spawn as a named agent team inside Claude Code. The orchestrator creates the team, dispatches via SendMessage for instant handoffs, and hooks enforce quality gates at the tool level.
+
+```
+Standalone:                          Plugin:
+┌──────────┐                         ┌──────────┐
+│ Crontab  │                         │Orchestrat│
+│ (sweep)  │                         │  (agent) │
+└────┬─────┘                         └────┬─────┘
+     │                                    │
+     │ reads/writes Asana                 │ TeamCreate + SendMessage
+     │                                    │
+┌────┴────┐ ┌────┐ ┌────┐          ┌────┴────┐ ┌────┐ ┌────┐
+│T2 (term)│ │T3  │ │T4  │          │T2 (agent│ │T3  │ │T4  │
+│ manual  │ │    │ │    │          │ spawned)│ │    │ │    │
+└─────────┘ └────┘ └────┘          └─────────┘ └────┘ └────┘
+```
+
+### What Changes in Plugin Mode
+
+| Aspect | Standalone | Plugin |
+|---|---|---|
+| Worker spawning | Manual (iTerm tabs) | Automatic (TeamCreate) |
+| Handoff latency | 15 min (sweep cycle) | <30 sec (SendMessage) |
+| Quality gates | Prompt-enforced | Hook-enforced (lint-gate, coverage-gate, scope-guard) |
+| Progress tracking | [HEARTBEAT] comments | Real-time telemetry via SendMessage |
+| Communication | Asana only | SendMessage + Asana (dual channel) |
+| Shutdown | Manual crontab edit | TeamDelete (clean teardown) |
+
+### Hooks: Infrastructure-Level Gates
+
+Plugin mode adds 3 hooks that enforce quality gates at the tool level:
+
+| Hook | Event | What it does |
+|---|---|---|
+| **lint-gate** | PreToolUse (Bash) | Blocks `git commit`/`gh pr create` unless tsc+lint+tests pass |
+| **coverage-gate** | Stop (tester) | Blocks tester completion unless >=80% coverage on new files |
+| **scope-guard** | PreToolUse (Edit/Write) | Warns on unpredicted files, blocks on 3rd |
+
 ## System Components
 
 ### 1. The Orchestrator (`/sdlc-orchestrate`)
