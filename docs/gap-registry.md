@@ -503,3 +503,48 @@ This registry is the foundation of AgentFlow's design. Each gap was discovered t
 **Fix:** Idle sweep optimization. If two consecutive sweeps find zero actionable items (no transitions, no dispatches, no dead workers), the orchestrator doubles its interval (15 min -> 30 min -> 60 min). Any new activity (human moves a card, worker posts a comment) resets to the default interval. Additionally, Sonnet is recommended for orchestration since it only reads state and makes routing decisions.
 
 **Implementation:** `skills/sdlc-orchestrate.md` tracks consecutive idle sweeps in the Status task. `setup.sh` configures adaptive crontab or documents manual interval adjustment.
+
+---
+
+## Plugin Mode Gaps (46-51)
+
+These gaps apply only when running AgentFlow in Claude Code plugin mode.
+
+### Gap 46: Team Agent Crashes Mid-Sprint
+
+**Problem:** TeamCreate succeeds but a team member crashes during execution. The team is in an inconsistent state.
+
+**Fix:** Orchestrator checks team member health on each sweep (progress tracker). If a member is unresponsive for 10 minutes, remove and re-add it. Fallback: if TeamCreate itself fails, fall back to individual AgentTool spawning and log a warning.
+
+### Gap 47: SendMessage Dropped (Handoff Lost)
+
+**Problem:** Builder sends "build complete" via SendMessage to reviewer, but the message is lost. Reviewer never starts.
+
+**Fix:** Asana comments are the durable fallback. Workers always post structured tags ([BUILD:COMPLETE], etc.) to Asana in addition to SendMessage. The orchestrator's next sweep reads Asana and processes any transitions that SendMessage missed.
+
+### Gap 48: Hook Blocks Legitimate Action (False Positive)
+
+**Problem:** Scope-guard blocks a file edit that's actually needed. Lint-gate blocks a commit due to a pre-existing issue unrelated to the task.
+
+**Fix:**
+- scope-guard: 2-warning buffer before blocking. Test files and package.json are always allowed.
+- lint-gate: only runs on feature branches (not main). If tsc/lint/test scripts don't exist, skip that check.
+- coverage-gate: only checks new files, not modified files. Missing coverage tooling = allow with warning.
+
+### Gap 49: MCP Auto-Config Connects Wrong PM Tool
+
+**Problem:** Plugin's .mcp.json auto-configures Asana, but user has Linear configured at the project level. Two PM MCPs are connected — which one is authoritative?
+
+**Fix:** Project-level .mcp.json takes precedence over plugin-level. The plugin detects which PM MCP is available and uses the matching adapter. If multiple PM MCPs are connected, warn the user and ask which to use.
+
+### Gap 50: Plugin + Standalone Mode Conflict
+
+**Problem:** User has both the crontab running (standalone mode) AND the plugin orchestrator running. Two orchestrators fight over the same tasks.
+
+**Fix:** Plugin orchestrate skill checks for active crontab entry on startup. If found, warns: "Detected active crontab entry for agentflow-cron.sh. Disable it to avoid conflicts: crontab -e and comment out the line." The Asana-level [SWEEP:RUNNING] lock prevents actual conflicts, but dual-mode is wasteful and confusing.
+
+### Gap 51: Progress Tracker SendMessage Floods Orchestrator
+
+**Problem:** 4 workers each sending progress every 5 seconds = 48 messages per minute. The orchestrator's context fills up with progress noise.
+
+**Fix:** Rate-limit progress updates to 1 per 30 seconds per worker (8 messages per minute total). Workers buffer progress locally and send only the latest snapshot. Orchestrator processes progress updates in bulk during the status dashboard update step, not inline.

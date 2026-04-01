@@ -15,7 +15,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Constants
 # ---------------------------------------------------------------------------
-AGENTFLOW_VERSION="1.0.0"
+AGENTFLOW_VERSION="2.0.0"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 INSTALL_DIR="$HOME/.claude"
 SDLC_DIR="$INSTALL_DIR/sdlc"
@@ -175,6 +175,28 @@ fi
 info "Claude Code CLI: $CLAUDE_BIN"
 
 # ---------------------------------------------------------------------------
+# 1b. Detect Claude Code plugin support
+# ---------------------------------------------------------------------------
+PLUGIN_MODE=false
+PLUGIN_DIR="$HOME/.claude/plugins"
+
+if [[ -d "$PLUGIN_DIR" ]]; then
+  echo ""
+  echo "Claude Code plugin directory detected at $PLUGIN_DIR"
+  echo ""
+  echo "AgentFlow can be installed as a Claude Code plugin for:"
+  echo "  - Automatic worker spawning (no iTerm tabs needed)"
+  echo "  - Instant handoffs between workers"
+  echo "  - Infrastructure-level quality gates (hooks)"
+  echo ""
+  read -p "Install as plugin? [Y/n] " PLUGIN_CHOICE
+  PLUGIN_CHOICE="${PLUGIN_CHOICE:-Y}"
+  if [[ "$PLUGIN_CHOICE" =~ ^[Yy] ]]; then
+    PLUGIN_MODE=true
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 # 2. Check other prerequisites
 # ---------------------------------------------------------------------------
 WARNINGS=0
@@ -300,6 +322,23 @@ info "Prompts installed ($PROMPT_COUNT files)"
 
 cp "$SCRIPT_DIR/conventions.md" "$SDLC_DIR/conventions.md"
 info "Conventions installed"
+
+# ---------------------------------------------------------------------------
+# 5b. Install plugin (if chosen)
+# ---------------------------------------------------------------------------
+if $PLUGIN_MODE; then
+  PLUGIN_INSTALL_DIR="$PLUGIN_DIR/agentflow"
+  mkdir -p "$PLUGIN_INSTALL_DIR"
+  cp -r "$SCRIPT_DIR/plugin/"* "$PLUGIN_INSTALL_DIR/"
+  # Also copy dotfiles (like .mcp.json)
+  cp "$SCRIPT_DIR/plugin/.mcp.json" "$PLUGIN_INSTALL_DIR/.mcp.json" 2>/dev/null || true
+  info "Plugin installed to $PLUGIN_INSTALL_DIR"
+  echo ""
+  echo "  Plugin mode is now active. You can run:"
+  echo "    claude -p '/sdlc-orchestrate'   # Start pipeline (workers spawn automatically)"
+  echo ""
+  echo "  No need to set up crontab or open worker terminals."
+fi
 
 # ---------------------------------------------------------------------------
 # 6. Install crontab wrapper
