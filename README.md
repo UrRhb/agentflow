@@ -114,6 +114,39 @@ cp -r agentflow/prompts/* ~/.claude/sdlc/prompts/
 cp agentflow/conventions.md ~/.claude/sdlc/conventions.md
 ```
 
+### Plugin Installation (Recommended)
+
+If you're using Claude Code, install AgentFlow as a native plugin for automatic worker spawning, instant handoffs, and infrastructure-level quality gates:
+
+```bash
+# Install the plugin
+claude plugins install agentflow
+
+# Or manually: clone and link
+git clone https://github.com/UrRhb/agentflow.git
+cp -r agentflow/plugin ~/.claude/plugins/agentflow
+```
+
+**Plugin mode gives you:**
+- Automatic worker spawning (no iTerm tabs)
+- Instant handoffs via SendMessage (seconds, not 15 minutes)
+- Infrastructure-level quality gates (hooks enforce tsc/lint/test/coverage)
+- Real-time progress tracking
+- Clean team shutdown
+
+**Quick start (plugin mode):**
+```bash
+# 1. Create your spec
+# 2. Decompose into tasks
+claude -p "/spec-to-board"
+
+# 3. Start the pipeline (workers spawn automatically!)
+claude -p "/sdlc-orchestrate"
+
+# 4. Watch from your phone (Asana) or terminal
+claude -p "/sdlc-health"
+```
+
 ### Setup
 
 **1. Create your spec**
@@ -243,6 +276,7 @@ Claude: Graceful shutdown initiated. Active workers finishing...
 | **Parallel agents** | 4+ workers with conflict detection | Wave-based | Sequential | Sequential |
 | **Custom infrastructure** | None (uses existing PM tool) | CLI tool | Markdown files | Electron + SQLite |
 | **Adapter ecosystem** | Asana, GitHub Projects (planned), Linear (planned) | GitHub only | Any git repo | Local only |
+| **Worker spawning** | Automatic (plugin) or manual (standalone) | Manual | Manual | Manual |
 
 ### When to Use What
 
@@ -391,17 +425,29 @@ AgentFlow was designed by systematically identifying and closing 45 gaps in AI d
 
 ```
 agentflow/
-├── skills/                    # Claude Code skill files (copy to ~/.claude/skills/)
-│   ├── spec-to-asana.md       # Decompose spec → Kanban tasks
-│   ├── sdlc-worker.md         # Execute pipeline stages
-│   ├── sdlc-orchestrate.md    # Stateless orchestration sweep
-│   └── sdlc-stop.md           # Graceful shutdown
-├── prompts/                   # Stage-specific prompt templates
-│   ├── decompose.md           # Spec → atomic tasks
-│   ├── research.md            # Conditional research stage
-│   ├── build.md               # Build with lint gate
-│   ├── review.md              # Adversarial review
-│   └── test.md                # Test + integration
+├── core/                      # Shared logic (standalone + plugin)
+│   ├── skills/                # Claude Code skill files (copy to ~/.claude/skills/)
+│   │   ├── spec-to-asana.md   # Decompose spec → Kanban tasks
+│   │   ├── sdlc-worker.md     # Execute pipeline stages
+│   │   ├── sdlc-orchestrate.md# Stateless orchestration sweep
+│   │   └── sdlc-stop.md       # Graceful shutdown
+│   └── prompts/               # Stage-specific prompt templates
+│       ├── decompose.md       # Spec → atomic tasks
+│       ├── research.md        # Conditional research stage
+│       ├── build.md           # Build with lint gate
+│       ├── review.md          # Adversarial review
+│       └── test.md            # Test + integration
+├── plugin/                    # Claude Code native plugin
+│   ├── plugin.json            # Plugin manifest
+│   ├── .mcp.json              # MCP server configuration
+│   ├── commands/              # Slash commands (/sdlc-orchestrate, etc.)
+│   ├── agents/                # Subagent definitions (workers, reviewer)
+│   ├── hooks/                 # Pre/post tool-use hooks (quality gates)
+│   └── skills/                # Plugin-specific skills
+├── bin/                       # CLI scripts and crontab wrapper
+│   └── agentflow-cron.sh      # Crontab wrapper for standalone mode
+├── skills/                    # Legacy skill files (symlinks to core/)
+├── prompts/                   # Legacy prompt files (symlinks to core/)
 ├── conventions.md             # System conventions and protocols
 ├── adapters/                  # PM tool adapters
 │   ├── asana/                 # Asana MCP adapter (available)
@@ -413,6 +459,7 @@ agentflow/
 │   └── comparison.md          # Detailed competitive analysis
 ├── examples/                  # Example specs and configurations
 │   └── starter-spec.md        # Template SPEC.md to get started
+├── setup.sh                   # Setup script (detects plugin support)
 ├── CONTRIBUTING.md            # How to contribute
 ├── LICENSE                    # MIT
 └── README.md                  # You are here
